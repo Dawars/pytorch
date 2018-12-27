@@ -1382,3 +1382,8 @@ def log_sigmoid(g, input):
 @parse_args('v', 'i', 'i')
 def _argmax(g, self, dim, keepdims=None):
     return g.op("ArgMax", self, axis_i=dim, keepdims_i=keepdims)
+
+
+@parse_args('v', 'i', 'i')
+def _argmin(g, self, dim, keepdims=None):
+    return g.op("ArgMin", self, axis_i=dim, keepdims_i=keepdims)
