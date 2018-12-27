@@ -1377,3 +1377,13 @@ def rrelu(g, input, lower, upper, training, generator):
 def log_sigmoid(g, input):
     p = g.op('Sigmoid', input)
     return g.op('Log', p)
+
+
+@parse_args('v', 'i', 'i')
+def _argmax(g, self, dim, keepdims=None):
+    return g.op("ArgMax", self, axis_i=dim, keepdims_i=keepdims)
+
+
+@parse_args('v', 'i', 'i')
+def _argmin(g, self, dim, keepdims=None):
+    return g.op("ArgMin", self, axis_i=dim, keepdims_i=keepdims)
