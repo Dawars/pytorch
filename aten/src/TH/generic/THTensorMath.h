@@ -2,9 +2,6 @@
 #define TH_GENERIC_FILE "TH/generic/THTensorMath.h"
 #else
 
-TH_API void THTensor_(fill)(THTensor *r_, scalar_t value);
-TH_API void THTensor_(zero)(THTensor *r_);
-
 TH_API void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, scalar_t value);
 TH_API void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor* src);
 TH_API void THTensor_(maskedSelect)(THTensor *tensor, THTensor* src, THByteTensor *mask);
@@ -172,7 +169,6 @@ TH_API void THTensor_(floor)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(round)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(trunc)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(frac)(THTensor *r_, THTensor *t);
-TH_API void THTensor_(lerp)(THTensor *r_, THTensor *a, THTensor *b, scalar_t weight);
 
 TH_API void THTensor_(mean)(THTensor *r_, THTensor *t, int dimension, int keepdim);
 TH_API void THTensor_(std)(THTensor *r_, THTensor *t, int dimension, int biased, int keepdim);

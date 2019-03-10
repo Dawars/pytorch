@@ -817,6 +817,35 @@ class TestAutograd(TestCase):
         # Should not stack overflow
         scope()
 
+    @unittest.skipIf(not TEST_CUDA, "need CUDA memory stats")
+    def test_free_unneeded_tensor(self):
+        x = torch.randn(2, 3, 10, 10, device='cuda', requires_grad=True)
+        m = torch.randn(1, 3, 1, 1, device='cuda')
+
+        z = x.sum()
+        base_mem = torch.cuda.memory_allocated()
+        z = ((x + 2) * m).sum()
+        end_mem = torch.cuda.memory_allocated()
+
+        # In the end the memory usage should remain equal, because neither of
+        # (x + 2) and ((x + 2) * m) should be kept alive for backward, while the
+        # previous allocation of z had the same size as the current one.
+        self.assertEqual(base_mem, end_mem)
+
+    def test_no_unnecessary_save(self):
+        # If we kept x in the derivative Function of x * 2 we would
+        # get an error in the backward that would complain that we've
+        # modified x, which was needed for gradient computation.
+        # Since we should elide unnecessary saves, this test should pass.
+        mu = torch.ones(1, requires_grad=True)
+        x = torch.empty(1)
+        loss = 0
+        for i in range(3):
+            x.detach_()
+            x.copy_(mu + i)
+            loss += (x * torch.tensor([float(i)])).sum()
+        loss.backward()
+
     def test_no_grad(self):
         x = torch.ones(5, 5, requires_grad=True)
         y = Variable(torch.ones(5, 5) * 4)
@@ -1110,6 +1139,21 @@ class TestAutograd(TestCase):
                             self.assertEqual(requires_grad, output.requires_grad)
                             self.assertIs(dtype, output.dtype)
                             self.assertEqual(1, output.get_device())
+
+    def test_attribute_deletion(self):
+        x = torch.randn((5, 5), requires_grad=True)
+        del x.grad
+        self.assertIsNone(x.grad)
+        with self.assertRaises(RuntimeError):
+            del x.data
+        with self.assertRaises(TypeError):
+            x.data = None
+        with self.assertRaises(RuntimeError):
+            del x.requires_grad
+        with self.assertRaises(RuntimeError):
+            del x._grad_fn
+        with self.assertRaises(RuntimeError):
+            del x._backward_hooks
 
     def test_grad_assignment(self):
         x = torch.randn(5, 5)
@@ -1520,6 +1564,39 @@ class TestAutograd(TestCase):
                 return torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
 
             gradcheck(ctc_after_softmax, [x])
+
+    def _test_sparse_gather(self, size_x, size_ind, dim):
+        x = torch.randn(size_x, requires_grad=True)
+        if len(size_ind) > 0 and len(size_x) > 0:
+            ind = torch.randint(x.size(dim), size_ind)
+        else:
+            ind = torch.zeros(size_ind, dtype=torch.int64)
+        out = torch.gather(x, dim, ind, sparse_grad=False)
+        grad = torch.rand_like(out)
+        out.backward(grad)
+        grad_dense = x.grad.clone()
+        x.grad = None
+        out = torch.gather(x, dim, ind, sparse_grad=True)
+        out.backward(grad)
+        self.assertEqual(grad_dense, x.grad.to_dense())
+
+    def test_sparse_gather_dim0(self):
+        self._test_sparse_gather((10, 10), (5, 10), 0)
+
+    def test_sparse_gather_dim1(self):
+        self._test_sparse_gather((10, 10, 5), (10, 5, 5), 1)
+
+    def test_sparse_gather_dim_neg(self):
+        self._test_sparse_gather((10, 10, 5), (10, 10, 2), -1)
+
+    def test_sparse_gather_ind_scalar(self):
+        self._test_sparse_gather((10,), (), 0)
+
+    def test_sparse_gather_x_scalar(self):
+        self._test_sparse_gather((), (2,), 0)
+
+    def test_sparse_gather_both_scalar(self):
+        self._test_sparse_gather((), (), 0)
 
     def test_gc_in_destructor(self):
         """
@@ -2387,6 +2464,30 @@ class TestAutograd(TestCase):
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
     def test_where_functional_cuda(self):
         self._test_where_functional(lambda t: t.cuda())
+
+    def _test_lerp_tensor_weights(self, cast):
+        def construct_inputs(*shapes):
+            start = cast(torch.randn(shapes[0])).requires_grad_()
+            end = cast(torch.randn(shapes[1])).requires_grad_()
+            weight = cast(torch.randn(shapes[2]))
+            return [start, end, weight]
+
+        all_test_shapes = [((3, 3, 3), (3, 3, 3), (3, 3, 3)),  # no broadcasting
+                           ((3,), (3, 3, 3), (3, 3, 3)),  # start broadcasting - 1
+                           ((3, 3, 3), (3,), (3, 3, 3)),  # end broadcasting - 1
+                           ((3, 3, 3), (3, 3, 3), (3,)),  # weight broadcasting - 1
+                           ((), (3, 3, 3), (3, 3, 3)),  # start broadcasting - 2
+                           ((3, 3, 3), (), (3, 3, 3)),  # end broadcasting - 2
+                           ((3, 3, 3), (3, 3, 3), ()),  # weight broadcasting - 2
+                           ((3, 3), (3, 3, 3), (3,))]  # all broadcasting
+
+        for shapes in all_test_shapes:
+            cur_inputs = construct_inputs(*shapes)
+            gradcheck(torch.lerp, cur_inputs)
+            gradgradcheck(torch.lerp, cur_inputs)
+
+    def test_lerp_tensor_weights(self):
+        self._test_lerp_tensor_weights(lambda t: t)
 
     def test_reduce_dtype(self):
         def test_reduction(op, has_no_dim):
